@@ -1,18 +1,16 @@
 # %% [markdown]
 # # Notebook 3: TCR Analysis and Clonotype-State Linking
 #
-# This notebook integrates T cell receptor (TCR) sequencing data with the
-# scRNA-seq annotations from Notebook 2. The central analysis links T cell
-# clonal identity (clonotype) with transcriptional state — a key approach
-# for understanding tumour-infiltrating T cell dynamics in leukemia and
-# other cancers.
+# Integrates T cell receptor (TCR) sequencing with scRNA-seq annotations
+# to link clonal identity with transcriptional state — a central question
+# in tumour immunology and leukemia biology.
 #
 # Key analyses:
-# 1. TCR data integration with scRNA-seq AnnData
-# 2. Clonotype definition and abundance
-# 3. Clonal expansion across cell types and functional states
-# 4. **Clonotype → transcriptional state linkage** (core UHN requirement)
-# 5. VDJ gene usage and CDR3 properties
+# 1. TCR quality control and chain pairing
+# 2. Clonotype definition (identical alpha + beta CDR3)
+# 3. Clonal expansion across cell types
+# 4. **Clonotype → transcriptional state linkage** (core requirement)
+# 5. VDJ gene usage and CDR3 spectratype
 
 # %%
 import sys
@@ -25,100 +23,171 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import chi2_contingency
 
 from src.utils import savefig, clonal_expansion_label
 
 sc.settings.verbosity = 2
 sc.settings.set_figure_params(dpi=100, facecolor="white")
-
-# %%
-# Load annotated GEX data and full MuData (contains TCR modality)
-adata  = sc.read("../data/02_annotated.h5ad")
-mdata  = ir.datasets.wu2020()
-print(f"GEX cells: {adata.n_obs:,}")
-print(f"TCR cells in MuData: {mdata['airr'].n_obs:,}")
+sc.settings.autoshow = False   # prevent auto-display; we save manually
 
 # %% [markdown]
-# ## 1. Integrate TCR Data
+# ## 1. Load Data
 #
-# scirpy merges the AIRR (Adaptive Immune Receptor Repertoire) modality
-# with the GEX AnnData by shared cell barcodes. Only cells with both
-# GEX and TCR data are retained for clonotype analyses.
+# In scirpy >= 0.16, AIRR data is stored in `adata.obsm["airr"]`.
+# We work with the full MuData object and update the GEX modality
+# with our preprocessed, annotated data from Notebook 2.
 
 # %%
-# Transfer AIRR data into adata using shared barcodes
-airr_adata = mdata["airr"]
-shared_barcodes = adata.obs_names.intersection(airr_adata.obs_names)
-print(f"Cells with both GEX and TCR: {len(shared_barcodes):,}")
+# Load our preprocessed + annotated GEX data
+adata = sc.read("../data/02_annotated.h5ad")
+print(f"Preprocessed GEX: {adata.n_obs:,} cells")
 
-# Subset to shared cells
-adata_tcr = adata[shared_barcodes].copy()
-airr_sub  = airr_adata[shared_barcodes].copy()
+# Load the original wu2020 MuData (cached from Notebook 1)
+mdata = ir.datasets.wu2020()
+print(f"MuData modalities: {list(mdata.mod.keys())}")
 
-# Copy AIRR obs columns into GEX adata
-for col in airr_sub.obs.columns:
-    adata_tcr.obs[col] = airr_sub.obs[col].values
+# Run index_chains FIRST — required before any scirpy tl/pl functions
+ir.pp.index_chains(mdata)
+print("Chain indices built.")
+
+# %%
+# Align barcodes
+shared = adata.obs_names.intersection(mdata["gex"].obs_names)
+print(f"Shared barcodes: {len(shared):,}")
+
+# Subset MuData to shared cells (index_chains already built on full mdata)
+mdata_sub = mdata[shared].copy()
+
+# Transfer annotations — write to both gex obs AND global mdata obs
+# so scirpy functions that look in either place can find them
+ann_cols = ["leiden", "cell_type", "Exhausted_score", "Effector_score", "Naive_score"]
+for col in ann_cols:
+    if col in adata.obs.columns:
+        vals = adata.obs.loc[shared, col].values
+        mdata_sub["gex"].obs[col] = vals
+        # Also add to global obs (reindexed to full MuData obs)
+        mdata_sub.obs[col] = (
+            adata.obs[col]
+            .reindex(mdata_sub.obs_names)
+            .values
+        )
+
+# Transfer UMAP embedding
+mdata_sub["gex"].obsm["X_umap"] = adata[shared].obsm["X_umap"]
+
+print(f"Working dataset: {mdata_sub.n_obs:,} cells")
+print(f"Annotations in gex: {[c for c in ann_cols if c in mdata_sub['gex'].obs.columns]}")
+print(f"Annotations in mdata.obs: {[c for c in ann_cols if c in mdata_sub.obs.columns]}")
 
 # %% [markdown]
-# ## 2. Clonotype Definition
+# ## 2. TCR Chain Quality Control
 #
-# A clonotype is defined by identical CDR3 amino acid sequences for both
-# TCR alpha and beta chains. Cells sharing the same clonotype are clonally
-# related — they descended from the same ancestral T cell.
+# Not all cells have complete alpha+beta chain pairs. We assess pairing
+# quality before defining clonotypes.
 
 # %%
-ir.tl.chain_qc(adata_tcr)
+ir.tl.chain_qc(mdata_sub)
 
-# Define clonotypes: cells with identical TRA+TRB CDR3 sequences
+# chain_qc writes to mdata["airr"].obs — align by barcode before copying
+airr_obs = mdata_sub["airr"].obs
+if "receptor_type" in airr_obs.columns:
+    # Use reindex to safely align — cells without TCR get NaN
+    mdata_sub["gex"].obs["receptor_type"] = (
+        airr_obs["receptor_type"]
+        .reindex(mdata_sub["gex"].obs_names)
+        .values
+    )
+elif "receptor_type" in mdata_sub.obs.columns:
+    mdata_sub["gex"].obs["receptor_type"] = (
+        mdata_sub.obs["receptor_type"]
+        .reindex(mdata_sub["gex"].obs_names)
+        .values
+    )
+
+print("Chain QC complete. receptor_type counts:")
+print(mdata_sub["gex"].obs["receptor_type"].value_counts(dropna=False))
+
+# %%
+ir.pl.group_abundance(
+    mdata_sub,
+    groupby="receptor_type",
+    target_col="cell_type",
+)
+savefig("03_chain_qc_receptor_type")
+plt.show()
+
+# %%
+# Keep only cells with paired alpha+beta TCR for clonotype analysis
+mdata_paired = mdata_sub[
+    mdata_sub["gex"].obs["receptor_type"].astype(str) == "TCR"
+].copy()
+ir.pp.index_chains(mdata_paired)
+print(f"Cells with paired TCR: {mdata_paired.n_obs:,}")
+
+# Force re-transfer all annotations after MuData subset
+paired_barcodes = mdata_paired["gex"].obs_names
+for col in ann_cols:
+    if col in adata.obs.columns:
+        mdata_paired["gex"].obs[col] = (
+            adata.obs[col].reindex(paired_barcodes).values
+        )
+print(f"Annotations available: {[c for c in ann_cols if c in mdata_paired['gex'].obs.columns]}")
+
+# %% [markdown]
+# ## 3. Clonotype Definition
+#
+# Cells sharing identical CDR3 amino acid sequences for both TCR alpha
+# and beta chains are assigned to the same clonotype.
+
+# %%
 ir.tl.define_clonotypes(
-    adata_tcr,
-    receptor_arms="all",          # require both alpha and beta chains
-    dual_ir="primary_only",       # use primary chain only
-    sequence="aa",                # amino acid CDR3 matching
+    mdata_paired,
+    receptor_arms="all",
+    dual_ir="primary_only",
 )
 
-n_clonotypes = adata_tcr.obs["clone_id"].nunique()
-print(f"Unique clonotypes: {n_clonotypes:,}")
-print(f"Cells with clonotype: {adata_tcr.obs['clone_id'].notna().sum():,}")
+# In scirpy 0.22, clone_id is stored in mdata["airr"].obs — transfer to gex
+for col in ["clone_id", "clone_id_size"]:
+    if col in mdata_paired["airr"].obs.columns:
+        mdata_paired["gex"].obs[col] = (
+            mdata_paired["airr"].obs[col]
+            .reindex(mdata_paired["gex"].obs_names)
+            .values
+        )
 
-# %%
-ir.tl.clonotype_network(adata_tcr, min_cells=2)
+n_clonotypes = mdata_paired["gex"].obs["clone_id"].nunique()
+print(f"Unique clonotypes defined: {n_clonotypes:,}")
+print(f"Cells assigned to a clonotype: "
+      f"{mdata_paired['gex'].obs['clone_id'].notna().sum():,}")
 
 # %% [markdown]
-# ## 3. Clonal Expansion
-#
-# Clonal expansion — the proliferation of a single T cell clone — is a
-# hallmark of antigen-driven immune responses. Highly expanded clones in
-# tumours indicate tumour-reactive T cells.
+# ## 4. Clonal Expansion
 
 # %%
-# Add clonal expansion category (singleton / small / medium / large)
-clonal_expansion_label(adata_tcr, clonotype_col="clone_id")
-
-print(adata_tcr.obs["clonal_expansion"].value_counts())
+clonal_expansion_label(mdata_paired["gex"], clonotype_col="clone_id")
+print(mdata_paired["gex"].obs["clonal_expansion"].value_counts())
 
 # %%
-# Expansion on UMAP
-ir.pl.umap(
-    adata_tcr,
+sc.pl.umap(
+    mdata_paired["gex"],
     color="clonal_expansion",
     palette={
+        "no_tcr":    "#EEEEEE",
         "singleton": "#CCCCCC",
         "small":     "#FDB462",
         "medium":    "#E41A1C",
         "large":     "#8B0000",
     },
-    title="Clonal expansion",
+    title="Clonal expansion on UMAP",
     show=False,
 )
 savefig("03_umap_clonal_expansion")
 plt.show()
 
 # %%
-# Expansion by cell type — stacked bar chart
+# Expansion proportion by cell type
 exp_ct = (
-    adata_tcr.obs
+    mdata_paired["gex"].obs
     .groupby(["cell_type", "clonal_expansion"], observed=True)
     .size()
     .unstack(fill_value=0)
@@ -126,11 +195,9 @@ exp_ct = (
 )
 
 exp_ct.plot(
-    kind="bar",
-    stacked=True,
-    color=["#CCCCCC", "#FDB462", "#E41A1C", "#8B0000"],
-    figsize=(8, 5),
-    edgecolor="white",
+    kind="bar", stacked=True,
+    color=["#EEEEEE", "#CCCCCC", "#FDB462", "#E41A1C", "#8B0000"],
+    figsize=(8, 5), edgecolor="white",
 )
 plt.xlabel("Cell type")
 plt.ylabel("Proportion")
@@ -141,43 +208,29 @@ savefig("03_expansion_by_celltype")
 plt.show()
 
 # %% [markdown]
-# ## 4. Clonotype → Transcriptional State Linkage
+# ## 5. Clonotype → Transcriptional State Linkage
 #
-# **Key analysis:** This links clonal identity with transcriptional
-# programme, revealing whether expanded clones preferentially occupy
-# specific functional states (e.g., exhausted, effector, naive).
-#
-# This is the central question in tumour immunology: do expanded,
-# tumour-reactive clones become exhausted or remain functional?
+# The key analysis: do expanded clones preferentially occupy exhausted,
+# effector, or naive transcriptional states?
 
 # %%
-# Score cells for exhaustion and effector states
-EXHAUSTION_GENES = ["PDCD1", "HAVCR2", "TIGIT", "LAG3", "CTLA4", "ENTPD1"]
-EFFECTOR_GENES   = ["GZMB", "PRF1", "IFNG", "TNF", "GZMK"]
-NAIVE_GENES      = ["CCR7", "TCF7", "SELL", "LEF1"]
-
-for name, genes in [
-    ("exhaustion", EXHAUSTION_GENES),
-    ("effector",   EFFECTOR_GENES),
-    ("naive",      NAIVE_GENES),
-]:
-    valid = [g for g in genes if g in adata_tcr.var_names]
-    sc.tl.score_genes(adata_tcr, gene_list=valid, score_name=f"{name}_score")
-
-# %%
-# Compare transcriptional scores across expansion groups
-T_only = adata_tcr[adata_tcr.obs["cell_type"].isin(["CD8 T cell", "CD4 T cell"])].copy()
+gex = mdata_paired["gex"]
+T_only = gex[gex.obs["cell_type"].isin(["CD8 T cell", "CD4 T cell"])].copy()
 
 fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 expansion_order = ["singleton", "small", "medium", "large"]
-palette = ["#CCCCCC", "#FDB462", "#E41A1C", "#8B0000"]
 
-for ax, score in zip(axes, ["exhaustion_score", "effector_score", "naive_score"]):
+for ax, score in zip(axes, ["Exhausted_score", "Effector_score", "Naive_score"]):
     data_plot = [
         T_only.obs.loc[T_only.obs["clonal_expansion"] == exp, score].dropna().values
         for exp in expansion_order
+        if exp in T_only.obs["clonal_expansion"].values
     ]
-    ax.boxplot(data_plot, labels=expansion_order, patch_artist=True,
+    present_labels = [
+        exp for exp in expansion_order
+        if exp in T_only.obs["clonal_expansion"].values
+    ]
+    ax.boxplot(data_plot, labels=present_labels, patch_artist=True,
                boxprops=dict(facecolor="lightblue"),
                medianprops=dict(color="red", linewidth=2))
     ax.set_title(score.replace("_score", "").capitalize() + " score")
@@ -190,63 +243,44 @@ savefig("03_state_by_expansion")
 plt.show()
 
 # %%
-# Heatmap: mean transcriptional scores per clonotype (top 20 expanded)
+# Heatmap: top 20 expanded clonotypes × transcriptional state
 top_clones = (
-    adata_tcr.obs["clone_id"]
-    .value_counts()
-    .head(20)
-    .index
+    gex.obs["clone_id"].value_counts().head(20).index
 )
-
+clone_df = gex.obs[gex.obs["clone_id"].isin(top_clones)].copy()
 clone_scores = (
-    adata_tcr.obs[adata_tcr.obs["clone_id"].isin(top_clones)]
-    .groupby("clone_id")[["exhaustion_score", "effector_score", "naive_score"]]
+    clone_df.groupby("clone_id")[["Exhausted_score", "Effector_score", "Naive_score"]]
     .mean()
 )
 clone_scores.index = [f"Clone {i+1}" for i in range(len(clone_scores))]
 
 fig, ax = plt.subplots(figsize=(6, 8))
 sns.heatmap(
-    clone_scores,
-    cmap="RdBu_r",
-    center=0,
-    linewidths=0.5,
-    ax=ax,
+    clone_scores, cmap="RdBu_r", center=0,
+    linewidths=0.5, ax=ax,
     cbar_kws={"label": "Mean score"},
 )
-ax.set_title("Transcriptional state of top 20 expanded clonotypes")
-ax.set_xlabel("Functional score")
+ax.set_title("Top 20 expanded clonotypes:\ntranscriptional state")
 plt.tight_layout()
 savefig("03_clonotype_state_heatmap")
 plt.show()
 
 # %% [markdown]
-# ## 5. VDJ Gene Usage and CDR3 Properties
+# ## 6. VDJ Gene Usage and CDR3 Spectratype
 
 # %%
-# V gene usage for TRB (beta chain)
-ir.pl.vdj_usage(
-    adata_tcr,
-    full_combination=False,
-    show=False,
-)
+ir.pl.vdj_usage(mdata_paired, full_combination=False, )
 savefig("03_vdj_usage")
 plt.show()
 
 # %%
-# CDR3 length distribution
-ir.pl.spectratype(
-    adata_tcr,
-    color="cell_type",
-    viztype="bar",
-    show=False,
-)
+ir.pl.spectratype(mdata_paired, color="cell_type", viztype="bar", )
 savefig("03_cdr3_spectratype")
 plt.show()
 
 # %% [markdown]
-# ## 6. Save TCR-Integrated Data
+# ## 7. Save
 
 # %%
-adata_tcr.write("../data/03_tcr_integrated.h5ad")
+gex.write("../data/03_tcr_integrated.h5ad")
 print("Saved: data/03_tcr_integrated.h5ad")

@@ -39,10 +39,17 @@ MARKERS = {
 }
 
 # %%
+# Filter markers to genes present in the dataset
+MARKERS_PRESENT = {
+    ct: [g for g in genes if g in adata.var_names]
+    for ct, genes in MARKERS.items()
+    if any(g in adata.var_names for g in genes)
+}
+
 # Dotplot of marker genes across Leiden clusters
 sc.pl.dotplot(
     adata,
-    var_names=MARKERS,
+    var_names=MARKERS_PRESENT,
     groupby="leiden",
     standard_scale="var",
     show=False,
@@ -139,9 +146,15 @@ T_SUBSET_MARKERS = {
 t_cells = adata[adata.obs["cell_type"].isin(["CD8 T cell", "CD4 T cell"])].copy()
 print(f"T cells: {t_cells.n_obs:,}")
 
+T_SUBSET_MARKERS_PRESENT = {
+    state: [g for g in genes if g in adata.var_names]
+    for state, genes in T_SUBSET_MARKERS.items()
+    if any(g in adata.var_names for g in genes)
+}
+
 sc.pl.dotplot(
     t_cells,
-    var_names=T_SUBSET_MARKERS,
+    var_names=T_SUBSET_MARKERS_PRESENT,
     groupby="cell_type",
     standard_scale="var",
     title="T cell subset markers",

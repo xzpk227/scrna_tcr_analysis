@@ -70,7 +70,7 @@ li.mt.rank_aggregate(
 # Preview top interactions
 liana_res = adata_sub.uns["liana_res"]
 print(f"Total interactions scored: {len(liana_res):,}")
-liana_res.sort_values("aggregate_rank").head(10)
+liana_res.sort_values("magnitude_rank").head(10)
 
 # %% [markdown]
 # ## 3. Dot Plot: Top Interactions Involving T Cells
@@ -80,34 +80,41 @@ liana_res.sort_values("aggregate_rank").head(10)
 cd8_interactions = liana_res[
     (liana_res["source"] == "CD8 T cell") |
     (liana_res["target"] == "CD8 T cell")
-].sort_values("aggregate_rank").head(30)
+].sort_values("magnitude_rank").head(30)
 
-li.pl.dotplot(
+fig = li.pl.dotplot(
     adata_sub,
     uns_key="liana_res",
+    colour="magnitude_rank",
+    size="magnitude_rank",
     source_labels=["CD8 T cell"],
     target_labels=valid_types,
     top_n=20,
-    orderby="aggregate_rank",
+    orderby="magnitude_rank",
     orderby_ascending=True,
     figure_size=(10, 6),
-    show=False,
+    return_fig=True,
 )
-savefig("04_cd8_interactions_dotplot")
-plt.show()
+# liana returns a plotnine ggplot object — save with .save()
+fig.save("../figures/04_cd8_interactions_dotplot.png", dpi=150)
 
 # %% [markdown]
-# ## 4. Chord Diagram: Interaction Network
+# ## 4. Interaction Network (Circle Plot)
 
 # %%
-li.pl.connectivity(
+ax = li.pl.circle_plot(
     adata_sub,
     uns_key="liana_res",
+    groupby="cell_type",
+    source_labels=valid_types,
+    target_labels=valid_types,
     top_n=200,
-    show=False,
+    orderby="magnitude_rank",
+    orderby_ascending=True,
+    score_key="magnitude_rank",
 )
-savefig("04_interaction_network")
-plt.show()
+ax.get_figure().savefig("../figures/04_interaction_network.png", dpi=150, bbox_inches="tight")
+plt.close()
 
 # %% [markdown]
 # ## 5. Niche Analysis: Interactions in the Expanded Clone Context
@@ -154,13 +161,13 @@ non_expanded_res = pd.read_csv("../data/liana_non_expanded.csv")
 # Filter to CD8 T cell interactions in each
 exp_top = (
     expanded_res[expanded_res["source"].str.contains("expanded")]
-    .sort_values("aggregate_rank")
-    .head(15)[["source", "target", "ligand_complex", "receptor_complex", "aggregate_rank"]]
+    .sort_values("magnitude_rank")
+    .head(15)[["source", "target", "ligand_complex", "receptor_complex", "magnitude_rank"]]
 )
 non_exp_top = (
     non_expanded_res[non_expanded_res["source"].str.contains("non-expanded")]
-    .sort_values("aggregate_rank")
-    .head(15)[["source", "target", "ligand_complex", "receptor_complex", "aggregate_rank"]]
+    .sort_values("magnitude_rank")
+    .head(15)[["source", "target", "ligand_complex", "receptor_complex", "magnitude_rank"]]
 )
 
 fig, axes = plt.subplots(1, 2, figsize=(16, 6))
@@ -170,7 +177,7 @@ for ax, df, title in zip(
     ["Expanded CD8 T cell interactions", "Non-expanded CD8 T cell interactions"],
 ):
     df["interaction"] = df["ligand_complex"] + " → " + df["receptor_complex"]
-    ax.barh(df["interaction"], -np.log10(df["aggregate_rank"] + 1e-6),
+    ax.barh(df["interaction"], -np.log10(df["magnitude_rank"] + 1e-6),
             color="steelblue", edgecolor="white")
     ax.set_xlabel("-log10(aggregate rank)")
     ax.set_title(title)

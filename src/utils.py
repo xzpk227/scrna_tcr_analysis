@@ -59,17 +59,20 @@ def clonal_expansion_label(adata, clonotype_col: str = "clone_id") -> None:
       small       — clone size 2-5
       medium      — clone size 6-20
       large       — clone size > 20
+      no_tcr      — no clonotype assigned (NaN clone_id)
     """
-    counts = adata.obs[clonotype_col].value_counts()
-    size_map = counts.reindex(adata.obs[clonotype_col]).values
+    clone_series = adata.obs[clonotype_col].astype(str).replace("nan", np.nan)
+    counts = clone_series.value_counts()
+    size_map = counts.reindex(clone_series).values.astype(float)
 
     labels = np.where(
-        size_map == 1, "singleton",
+        np.isnan(size_map), "no_tcr",
+        np.where(size_map == 1, "singleton",
         np.where(size_map <= 5, "small",
-        np.where(size_map <= 20, "medium", "large"))
+        np.where(size_map <= 20, "medium", "large")))
     )
     adata.obs["clonal_expansion"] = pd.Categorical(
         labels,
-        categories=["singleton", "small", "medium", "large"],
+        categories=["no_tcr", "singleton", "small", "medium", "large"],
         ordered=True,
     )
