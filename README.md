@@ -47,6 +47,37 @@ jupytext --to notebook notebooks/01_preprocessing.py
 jupyter notebook
 ```
 
+## Results
+
+### Dataset Summary
+
+| Step | Metric | Value |
+|------|--------|-------|
+| QC filtering | Cells retained | **138,500** |
+| QC filtering | Genes retained | **20,479** |
+| Highly variable genes | Selected for PCA | **3,000** |
+| Cell annotation | T cells identified | **96,015** (69% of total) |
+| TCR integration | Cells with paired TCR | **95,314** |
+| Clonotype definition | Unique clonotypes | **53,142** |
+| LIANA | Ligand-receptor pairs scored | **4,517** |
+
+### Clonal Expansion
+
+| Category | Cells | Description |
+|----------|-------|-------------|
+| Singleton | 44,937 | Clone size = 1 |
+| Small | 17,155 | Clone size 2–5 |
+| Medium | 12,950 | Clone size 6–20 |
+| **Large** | **20,272** | Clone size > 20 — likely tumour-reactive |
+
+Large expanded clones represent **21% of all TCR+ cells**, consistent with strong antigen-driven expansion in the tumour microenvironment.
+
+### Key Finding: Clonotype → Transcriptional State
+
+Expanded clones (medium + large) show elevated exhaustion scores relative to singleton clones, consistent with progressive acquisition of an exhausted transcriptional state in tumour-reactive T cells. Visualised in `figures/03_clonotype_state_heatmap.png` and `figures/03_state_by_expansion.png`.
+
+---
+
 ## Key Analysis: Clonotype → Transcriptional State
 
 The central analysis in Notebook 3 links T cell clonal identity with functional transcriptional programme — addressing the question of whether expanded, tumour-reactive clones preferentially occupy exhausted, effector, or naive states. This directly mirrors the analytical focus of labs studying T cell biology in leukemia and bone marrow microenvironments.
