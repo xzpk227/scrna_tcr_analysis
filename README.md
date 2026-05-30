@@ -49,6 +49,31 @@ jupyter notebook
 
 ## Results
 
+### Visualizations
+
+**UMAP: Cell type annotation**
+![Cell type UMAP](figures/02_umap_celltypes.png)
+
+**UMAP: Clonal expansion**
+![Clonal expansion UMAP](figures/03_umap_clonal_expansion.png)
+
+**Clonal expansion by cell type**
+![Expansion by cell type](figures/03_expansion_by_celltype.png)
+
+**Transcriptional state by clonal expansion** *(core analysis)*
+![State by expansion](figures/03_state_by_expansion.png)
+
+**Top 20 expanded clonotypes: transcriptional state heatmap**
+![Clonotype state heatmap](figures/03_clonotype_state_heatmap.png)
+
+**Cell-cell interaction network**
+![Interaction network](figures/04_interaction_network.png)
+
+**CD8 T cell ligand-receptor interactions**
+![CD8 interactions](figures/04_cd8_interactions_dotplot.png)
+
+---
+
 ### Dataset Summary
 
 | Step | Metric | Value |

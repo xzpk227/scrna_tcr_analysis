@@ -1,5 +1,4 @@
 data/
-figures/
 *.h5ad
 *.h5
 __pycache__/
