@@ -77,23 +77,40 @@ plt.show()
 # "Unknown" for downstream exclusion or re-clustering.
 
 # %%
-# Manual annotation based on dotplot inspection
+# Annotation based on per-cluster mean marker expression (see below), not just
+# dotplot inspection. Two corrections to the original dotplot-based reading:
+#
+# 1. This dataset is CD3-sorted and T-cell-dominated: CD3E is moderately-to-
+#    highly expressed in nearly every cluster, so a high score on the
+#    "NK cell" marker panel (GNLY/NKG7/KLRD1) does not distinguish true NK
+#    cells from cytotoxic CD8 effector T cells, which also express these
+#    granzyme/cytotoxicity genes highly.
+# 2. Clusters originally labelled Monocyte (7), B cell (8), DC (12), and
+#    Plasma cell (13) have essentially zero expression of the
+#    lineage-defining markers for those types (CD14/LYZ, CD19/MS4A1/CD79A,
+#    FCER1A/CLEC10A, MZB1 respectively) but very high CD3E + CD8A/CD8B —
+#    they are CD8 T cell clusters. The true B cell and Plasma cell clusters
+#    (high MS4A1/CD79A/CD19 and MZB1 respectively) were instead sitting in
+#    the originally-unlabelled clusters 16 and 17.
 CLUSTER_ANNOTATION = {
     "0":  "CD8 T cell",
     "1":  "CD4 T cell",
-    "2":  "CD8 T cell",
+    "2":  "CD4 T cell",
     "3":  "CD4 T cell",
-    "4":  "NK cell",
-    "5":  "CD8 T cell",
-    "6":  "CD4 T cell",
-    "7":  "Monocyte",
-    "8":  "B cell",
+    "4":  "CD8 T cell",
+    "5":  "CD4 T cell",
+    "6":  "CD8 T cell",
+    "7":  "CD8 T cell",
+    "8":  "CD8 T cell",
     "9":  "CD8 T cell",
-    "10": "CD4 T cell",
+    "10": "CD8 T cell",
     "11": "NK cell",
-    "12": "DC",
-    "13": "Plasma cell",
-    "14": "Unknown",
+    "12": "CD8 T cell",
+    "13": "CD8 T cell",
+    "14": "Monocyte/DC",
+    "15": "CD8 T cell",
+    "16": "B cell",
+    "17": "Plasma cell",
 }
 
 adata.obs["cell_type"] = (
@@ -111,8 +128,7 @@ PALETTE = {
     "CD4 T cell":  "#4DBBD5",
     "NK cell":     "#00A087",
     "B cell":      "#3C5488",
-    "Monocyte":    "#F39B7F",
-    "DC":          "#8491B4",
+    "Monocyte/DC": "#F39B7F",
     "Plasma cell": "#91D1C2",
     "Unknown":     "#B0B0B0",
 }

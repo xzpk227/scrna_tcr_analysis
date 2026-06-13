@@ -25,3 +25,4 @@ dependencies:
     - igraph>=0.11.0
     - leidenalg>=0.10.0
     - adjusttext>=1.0.0
+    - harmonypy==0.0.10
