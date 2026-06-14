@@ -70,7 +70,36 @@ savefig("02_marker_violin")
 plt.show()
 
 # %% [markdown]
-# ## 2. Assign Cell Type Labels
+# ## 2. Cross-check with Differential Expression
+#
+# The marker panels above are curated from prior immunology knowledge —
+# but a cluster's *actual* top distinguishing genes might not be in those
+# panels at all. As a cross-check, run a differential expression test
+# (Wilcoxon rank-sum, one cluster vs. rest) and inspect each cluster's
+# top genes to confirm (or challenge) the marker-based calls below —
+# especially for clusters like 11 ("NK cell"), whose marker panel
+# (GNLY/NKG7/KLRD1) overlaps with cytotoxic CD8 effector T cells.
+
+# %%
+sc.tl.rank_genes_groups(adata, groupby="leiden", method="wilcoxon")
+
+top_de_genes = pd.DataFrame(adata.uns["rank_genes_groups"]["names"]).head(10)
+for cl in adata.obs["leiden"].cat.categories:
+    print(f"Cluster {cl}: {top_de_genes[cl].tolist()}")
+
+# %%
+sc.pl.rank_genes_groups_dotplot(
+    adata,
+    n_genes=5,
+    groupby="leiden",
+    standard_scale="var",
+    show=False,
+)
+savefig("02_rank_genes_groups_dotplot")
+plt.show()
+
+# %% [markdown]
+# ## 3. Assign Cell Type Labels
 #
 # Based on marker expression, assign broad cell type labels to each
 # Leiden cluster. Clusters with ambiguous identity are labelled as
@@ -92,6 +121,16 @@ plt.show()
 #    they are CD8 T cell clusters. The true B cell and Plasma cell clusters
 #    (high MS4A1/CD79A/CD19 and MZB1 respectively) were instead sitting in
 #    the originally-unlabelled clusters 16 and 17.
+# 3. Cluster 11 was originally called "NK cell" based on high GNLY/NKG7, but
+#    the rank_genes_groups cross-check above shows (a) its top DE genes are
+#    dominated by ribosomal/mitochondrial genes and RPS4Y1 (a Y-chromosome
+#    gene, not a cell-identity marker), (b) NCAM1 (CD56), the canonical NK
+#    marker, is ~0 in every cluster including this one, and (c) its CD3E is
+#    still moderately high (1.85) — much higher than true CD3-negative NK
+#    cells should be, and GNLY/NKG7 are equally or more elevated in clusters
+#    already called CD8 T cell (e.g. cluster 7). There's no clean alternative
+#    label, so cluster 11 is left as "Unknown" rather than forced into either
+#    "NK cell" or "CD8 T cell".
 CLUSTER_ANNOTATION = {
     "0":  "CD8 T cell",
     "1":  "CD4 T cell",
@@ -104,7 +143,7 @@ CLUSTER_ANNOTATION = {
     "8":  "CD8 T cell",
     "9":  "CD8 T cell",
     "10": "CD8 T cell",
-    "11": "NK cell",
+    "11": "Unknown",
     "12": "CD8 T cell",
     "13": "CD8 T cell",
     "14": "Monocyte/DC",
@@ -145,7 +184,7 @@ savefig("02_umap_celltypes")
 plt.show()
 
 # %% [markdown]
-# ## 3. T Cell Subset Analysis
+# ## 4. T Cell Subset Analysis
 #
 # Focus on T cells for downstream TCR integration. Identify naive,
 # memory, effector, and regulatory T cell subsets.
@@ -197,7 +236,7 @@ savefig("02_tcell_state_scores")
 plt.show()
 
 # %% [markdown]
-# ## 4. Save Annotated Data
+# ## 5. Save Annotated Data
 
 # %%
 adata.write("../data/02_annotated.h5ad")

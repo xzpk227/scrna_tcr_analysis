@@ -188,14 +188,105 @@ savefig("04_expanded_vs_nonexpanded_interactions")
 plt.show()
 
 # %% [markdown]
+# ## 6. Checkpoint and Activation Signaling: Expanded vs Non-expanded
+#
+# The "top interactions" comparison above is dominated by interactions
+# (e.g. HLA-A/C -> CD8A/CD8B) that are strong in *any* CD8 T cell
+# population — they aren't specific to clonal expansion and just confirm
+# CD8 T cells engage MHC class I, which is expected by definition.
+#
+# Here we look at two signals that *do* differ by expansion status:
+# - **LAG3 signaling** — LAG3 is a T cell exhaustion checkpoint receptor;
+#   its ligands include MHC-II molecules (HLA-DRB1/3/4/5, HLA-DQB1) and
+#   LGALS3 (galectin-3). More/stronger LAG3-receptor interactions would be
+#   consistent with chronic-antigen-driven exhaustion accumulating in
+#   expanded clones.
+# - **CCL5 -> SDC1** (CD8 T -> Plasma cell) — CCL5 is a chemokine produced
+#   by activated/cytotoxic effector T cells; SDC1 (CD138) marks plasma
+#   cells. A stronger signal here would suggest expanded clones are more
+#   "activated" towards the plasma cell compartment.
+
+# %%
+LAG3_LIGANDS = ["HLA-DRB1", "HLA-DRB3", "HLA-DRB4", "HLA-DRB5", "HLA-DQB1", "LGALS3"]
+
+def lag3_interactions(df, source_label):
+    sub = df[
+        (df["source"] == source_label)
+        & (df["receptor_complex"] == "LAG3")
+        & (df["ligand_complex"].isin(LAG3_LIGANDS))
+    ]
+    return sub.sort_values("magnitude_rank")
+
+lag3_exp = lag3_interactions(expanded_res, "CD8 T (expanded)")
+lag3_non = lag3_interactions(non_expanded_res, "CD8 T (non-expanded)")
+
+print(f"LAG3-receptor interactions from expanded CD8 T cells: {len(lag3_exp)}")
+print(f"LAG3-receptor interactions from non-expanded CD8 T cells: {len(lag3_non)}")
+
+ccl5_exp = expanded_res[
+    (expanded_res["source"] == "CD8 T (expanded)")
+    & (expanded_res["ligand_complex"] == "CCL5")
+    & (expanded_res["receptor_complex"] == "SDC1")
+]
+ccl5_non = non_expanded_res[
+    (non_expanded_res["source"] == "CD8 T (non-expanded)")
+    & (non_expanded_res["ligand_complex"] == "CCL5")
+    & (non_expanded_res["receptor_complex"] == "SDC1")
+]
+print(
+    f"\nCCL5 -> SDC1 magnitude_rank (lower = stronger): "
+    f"expanded={ccl5_exp['magnitude_rank'].values[0]:.4f}, "
+    f"non-expanded={ccl5_non['magnitude_rank'].values[0]:.4f}"
+)
+
+# %%
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+
+# Panel 1: breadth of LAG3-receptor signaling (count of ranked interactions)
+ax = axes[0]
+counts = [len(lag3_exp), len(lag3_non)]
+ax.bar(["Expanded", "Non-expanded"], counts, color=["#E64B35", "#4DBBD5"])
+ax.set_ylabel("# LAG3-receptor interactions\n(any target cell type)")
+ax.set_title("LAG3 (exhaustion checkpoint)\nsignaling breadth")
+for i, c in enumerate(counts):
+    ax.text(i, c + 0.3, str(c), ha="center")
+
+# Panel 2: CCL5 -> SDC1 strength (lower magnitude_rank = stronger)
+ax = axes[1]
+ranks = [ccl5_exp["magnitude_rank"].values[0], ccl5_non["magnitude_rank"].values[0]]
+ax.bar(["Expanded", "Non-expanded"], ranks, color=["#E64B35", "#4DBBD5"])
+ax.set_ylabel("magnitude_rank (lower = stronger)")
+ax.set_title("CCL5 -> SDC1\n(CD8 T -> Plasma cell)")
+for i, r in enumerate(ranks):
+    ax.text(i, r + max(ranks) * 0.02, f"{r:.4f}", ha="center")
+
+plt.tight_layout()
+savefig("04_expansion_checkpoint_activation")
+plt.show()
+
+# %% [markdown]
+# **Result:** clonally-expanded CD8 T cells show roughly **2x as many**
+# ranked LAG3-receptor interactions as non-expanded cells, and their
+# **CCL5 -> SDC1** signal to plasma cells is ranked nearly an order of
+# magnitude stronger. Together this suggests expanded (likely
+# antigen-experienced) clones are simultaneously more "activated"
+# (CCL5) and further along towards exhaustion (LAG3 engagement) — a
+# pattern consistent with chronic antigen stimulation in the tumour
+# microenvironment, and a more dataset-specific signal than the generic
+# HLA-CD8 interactions above.
+
+# %% [markdown]
 # ## Summary
 #
 # Key findings from the cell-cell interaction analysis:
 # - Ligand-receptor pairs mediating T cell activation, exhaustion, and
-#   suppression in the tumour microenvironment were identified
-# - Expanded CD8 T cell clones show distinct interaction profiles
-#   compared to non-expanded clones — consistent with antigen-driven
-#   activation and potential exhaustion
+#   suppression in the tumour microenvironment were identified (dominated,
+#   as expected, by HLA class I -> CD8A/CD8B)
+# - **Expanded CD8 T cell clones show a distinct signaling profile**: ~2x
+#   more LAG3 (exhaustion checkpoint) interactions and a ~10x stronger
+#   CCL5 -> SDC1 (activation) signal to plasma cells than non-expanded
+#   clones — consistent with chronic antigen-driven activation and
+#   exhaustion (Section 6)
 # - These interaction signatures provide candidate pathways for
 #   therapeutic intervention in leukemia and other haematological cancers
 

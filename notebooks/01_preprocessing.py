@@ -55,23 +55,28 @@ sc.pp.calculate_qc_metrics(
 )
 
 # %%
-fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+def plot_qc_distributions(adata, suptitle):
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
 
-axes[0].hist(adata.obs["n_genes_by_counts"], bins=50, color="steelblue", edgecolor="white")
-axes[0].set_xlabel("Genes per cell")
-axes[0].set_ylabel("Cells")
-axes[0].set_title("Genes per cell")
+    axes[0].hist(adata.obs["n_genes_by_counts"], bins=50, color="steelblue", edgecolor="white")
+    axes[0].set_xlabel("Genes per cell")
+    axes[0].set_ylabel("Cells")
+    axes[0].set_title("Genes per cell")
 
-axes[1].hist(adata.obs["total_counts"], bins=50, color="salmon", edgecolor="white")
-axes[1].set_xlabel("UMI counts per cell")
-axes[1].set_title("UMI counts per cell")
+    axes[1].hist(adata.obs["total_counts"], bins=50, color="salmon", edgecolor="white")
+    axes[1].set_xlabel("UMI counts per cell")
+    axes[1].set_title("UMI counts per cell")
 
-axes[2].hist(adata.obs["pct_counts_mt"], bins=50, color="mediumpurple", edgecolor="white")
-axes[2].set_xlabel("% mitochondrial counts")
-axes[2].set_title("Mitochondrial fraction")
+    axes[2].hist(adata.obs["pct_counts_mt"], bins=50, color="mediumpurple", edgecolor="white")
+    axes[2].set_xlabel("% mitochondrial counts")
+    axes[2].set_title("Mitochondrial fraction")
 
-plt.tight_layout()
-savefig("01_qc_distributions")
+    fig.suptitle(suptitle)
+    plt.tight_layout()
+    return fig
+
+plot_qc_distributions(adata, f"QC distributions — before filtering (n={adata.n_obs:,} cells)")
+savefig("01_qc_distributions_before")
 plt.show()
 
 # %% [markdown]
@@ -93,6 +98,11 @@ adata = adata[adata.obs["pct_counts_mt"] < 20].copy()
 
 print(f"Cells after filtering:  {adata.n_obs:,}")
 print(qc_summary(adata).to_string(index=False))
+
+# %%
+plot_qc_distributions(adata, f"QC distributions — after filtering (n={adata.n_obs:,} cells)")
+savefig("01_qc_distributions_after")
+plt.show()
 
 # %% [markdown]
 # ## 3. Normalization and Feature Selection

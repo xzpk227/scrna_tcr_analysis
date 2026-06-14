@@ -10,7 +10,6 @@
 # 2. Clonotype definition (identical alpha + beta CDR3)
 # 3. Clonal expansion across cell types
 # 4. **Clonotype → transcriptional state linkage** (core requirement)
-# 5. VDJ gene usage and CDR3 spectratype
 
 # %%
 import sys
@@ -22,7 +21,6 @@ import muon as mu
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 from src.utils import savefig, clonal_expansion_label
 
@@ -242,44 +240,8 @@ plt.tight_layout()
 savefig("03_state_by_expansion")
 plt.show()
 
-# %%
-# Heatmap: top 20 expanded clonotypes × transcriptional state
-top_clones = (
-    gex.obs["clone_id"].value_counts().head(20).index
-)
-clone_df = gex.obs[gex.obs["clone_id"].isin(top_clones)].copy()
-clone_scores = (
-    clone_df.groupby("clone_id")[["Exhausted_score", "Effector_score", "Naive_score"]]
-    .mean()
-)
-clone_scores.index = [f"Clone {i+1}" for i in range(len(clone_scores))]
-
-fig, ax = plt.subplots(figsize=(6, 8))
-sns.heatmap(
-    clone_scores, cmap="RdBu_r", center=0,
-    linewidths=0.5, ax=ax,
-    cbar_kws={"label": "Mean score"},
-)
-ax.set_title("Top 20 expanded clonotypes:\ntranscriptional state")
-plt.tight_layout()
-savefig("03_clonotype_state_heatmap")
-plt.show()
-
 # %% [markdown]
-# ## 6. VDJ Gene Usage and CDR3 Spectratype
-
-# %%
-ir.pl.vdj_usage(mdata_paired, full_combination=False, )
-savefig("03_vdj_usage")
-plt.show()
-
-# %%
-ir.pl.spectratype(mdata_paired, color="cell_type", viztype="bar", )
-savefig("03_cdr3_spectratype")
-plt.show()
-
-# %% [markdown]
-# ## 7. Save
+# ## 6. Save
 
 # %%
 gex.write("../data/03_tcr_integrated.h5ad")

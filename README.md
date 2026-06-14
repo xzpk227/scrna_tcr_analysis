@@ -30,6 +30,46 @@ Combining these lets them ask: *do clones that are expanding in the tumor also s
 
 **Why it matters:** the takeaway is a proof-of-concept that a relatively simple blood test — looking for this "dual-expansion" signature among T cell clones — could one day help predict whether a patient will benefit from immunotherapy, without needing a tumor biopsy.
 
+## What the data actually looks like
+
+Every cell in this dataset has two completely different types of measurement attached to it. Both are indexed by the same **cell barcode** (its unique ID, e.g. `RT2_AAACCTGAGGTAGCCA-1`) — the scRNA-seq data has one row per barcode, and the scTCR-seq data has one row per barcode, so matching barcodes across the two tables is how Notebook 3 joins them into a single merged dataset:
+
+**1. scRNA-seq ("gene expression") — what is this cell *doing*?**
+
+For each cell, this is a row of numbers — one per gene (~20,000 genes) — saying how many copies of that gene's mRNA were detected. For example, two real cells' rows might look like:
+
+| Barcode | LOC283788 | RBCK1 | PSMF1 | SNRPB | PCED1A | ... |
+|---|---|---|---|---|---|---|
+| `RT2_AAACCTGAGGTAGCCA-1` | 1 | 1 | 1 | 2 | 1 | ... |
+| `RT2_AAACCTGCAGGTCCAC-1` | 0 | 0 | 2 | 1 | 0 | ... |
+
+Most of the ~20,000 per-gene values are 0 (a gene simply wasn't detected in that cell). This raw gene-count matrix is the *only* input — everything else (the `leiden` cluster from Notebook 1, then `cell_type` and the continuous **state scores** `Exhausted_score`/`Effector_score`/`Naive_score` from Notebook 2) is *derived* from these ~20,000 numbers per cell, not part of the raw data itself.
+
+**2. scTCR-seq ("receptor sequencing") — what is this cell *programmed to recognize*?**
+
+For each cell, this captures the sequenced T cell receptor chain(s) recovered for that cell — one record per chain (alpha and/or beta), with fields like:
+
+| Barcode | locus | v_call | j_call | junction_aa (CDR3) | duplicate_count |
+|---|---|---|---|---|---|
+| `RT2_AAACCTGAGGTAGCCA-1` | TRB | TRBV2 | TRBJ2-1 | CASSGGYYNEQFF | 6 |
+| `RT2_AAACCTGAGGTAGCCA-1` | TRA | TRAV12-2 | TRAJ42 | ... | ... |
+
+`v_call`/`j_call` are which V/J gene segments were used to build the receptor, and `junction_aa` (the CDR3 amino acid sequence) is the actual "barcode/key" sequence that determines what the receptor recognizes.
+
+Cells with the *identical* `junction_aa` sequence(s) are grouped into the same **clonotype** — these are the "clones" described above. Everything below is *derived* from the raw chain records above, computed by Notebook 3:
+- `clone_id` — which clonal family this cell belongs to (e.g. `clone_id = 0`), assigned by grouping cells with identical CDR3 sequences
+- `clone_id_size` — how many cells share that clone_id across the whole dataset (e.g. `310`)
+- `clonal_expansion` — a bucketed version of clone size: `singleton` (44,937 cells, size=1), `small`, `medium`, or `large` (20,272 cells, the most expanded clones)
+- `receptor_type` — QC flag derived from how many/which chains were recovered (`"TCR"` = clean paired alpha+beta, vs. `"no IR"`, `"multichain"`, `"ambiguous"`)
+
+**Putting it together:** after joining on the barcode, a single row in the merged dataset (`data/03_tcr_integrated.h5ad`) looks like (the `cell_type`/`Exhausted_score`/`Effector_score` columns come from the scRNA-seq side above; `clone_id`/`clone_id_size`/`clonal_expansion` come from the scTCR-seq side):
+
+| barcode | patient | source | cell_type | Exhausted_score | Effector_score | clone_id | clone_id_size | clonal_expansion |
+|---|---|---|---|---|---|---|---|---|
+| `RT2_AAACCTGAGGTAGCCA-1` | Renal2 | Tumor | CD8 T cell | -0.39 | 0.81 | 0 | 310 | large |
+
+This is what makes the whole analysis possible: **for the same cell**, you know both *what job it's doing* (from gene expression / state scores) *and* *which clonal family it belongs to and how expanded that family is* (from TCR sequencing) — so you can directly ask "are highly-expanded clones (large `clone_id_size`) more exhausted (`Exhausted_score`) than singletons?"
+
 ## Overview
 
 | Notebook | Analysis |
@@ -97,13 +137,16 @@ Each notebook reads the `.h5ad` (or `.csv`) file written by the previous step an
 
    We also drop genes detected in fewer than 3 cells (too rare to be informative). This leaves 138,500 cells and 20,479 genes.
 
-   ![QC distributions](figures/01_qc_distributions.png)
+   ![QC distributions before filtering](figures/01_qc_distributions_before.png)
+   ![QC distributions after filtering](figures/01_qc_distributions_after.png)
 
-3. **Normalization.** Raw counts aren't directly comparable between cells — a cell sequenced more deeply will simply have bigger numbers everywhere. We normalize each cell's counts to sum to 10,000 ("counts per 10k"), then log-transform (`log1p`) so the data behaves more like the roughly-normal distributions most statistical methods assume. The raw counts are kept in a separate `counts` layer for later steps (like differential expression) that need them.
+3. **Normalization.** Each gene's count is the number of UMIs (Unique Molecular Identifiers) detected for it — a UMI is a random tag attached to each mRNA molecule before PCR, so identical-UMI reads can be collapsed back into one original molecule, giving an accurate count rather than an inflated PCR-copy count. The raw counts are kept in a separate `counts` layer for later steps (like differential expression) that need them.
+   - **Library-size normalization.** Total UMI counts per cell ("library size") vary just from technical noise in capture and sequencing depth — a cell sequenced 2x as deeply will show ~2x bigger numbers for every gene, even if it's biologically identical to another cell. We remove this effect by normalizing each cell's counts to sum to 10,000 ("counts per 10k").
+   - **Log transform (`log1p`).** Expression values are heavily skewed, with a few highly-expressed genes (e.g. ribosomal genes) reaching counts in the thousands while most genes sit near 0. On the raw scale, a jump from 5,000→6,000 counts would dwarf a biologically meaningful jump from 2→3 counts. Taking the log (`log(x + 1)`, where the "+1" avoids `log(0)`) makes equal *fold-changes* (e.g. doubling) count equally regardless of starting value, preventing a handful of highly-expressed genes from dominating PCA/clustering and making the data behave more like the roughly-normal distributions most statistical methods assume.
 4. **Highly variable gene (HVG) selection.** Most of the ~20k genes are either always-on "housekeeping" genes or always-off, and don't help distinguish cell types. We pick the top 3,000 genes that vary the most across cells — these carry most of the biological signal.
 5. **Dimensionality reduction (PCA).** Even 3,000 genes is too many dimensions to cluster directly, and many of those genes are correlated with each other (e.g. all the genes that turn on together when a cell is "activated"). PCA compresses the 3,000-gene expression profile of each cell down to 50 "principal component" numbers that capture most of the variation, with much less redundancy.
 6. **Neighbours, UMAP, and clustering.** Using those 50 PCs:
-   - We build a "nearest neighbours" graph connecting each cell to the cells most similar to it.
+   - We build a "nearest neighbours" graph connecting each cell to the cells most similar to it: for each cell, we measure the (Euclidean) distance to every other cell in the 30-PC space, and connect it to its 15 closest neighbours (`sc.pp.neighbors(n_neighbors=15, n_pcs=30)`). Scanpy uses an approximate nearest-neighbour search (UMAP's algorithm, based on nearest-neighbour-descent) so this is fast even with ~138,500 cells, and converts the raw distances into edge weights ("connectivities") so cells that are very close together are more strongly connected.
    - **UMAP** projects this high-dimensional graph down to 2D so it can be plotted — nearby points are similar cells.
    - **Leiden clustering** uses the same graph to group cells into discrete clusters (here, at `resolution=0.5`) — this is the unsupervised step that finds "groups of similar cells" without knowing in advance what cell types exist.
 
@@ -118,6 +161,12 @@ Each notebook reads the `.h5ad` (or `.csv`) file written by the previous step an
 **Goal:** figure out what cell type each Leiden cluster from Notebook 1 actually is, by checking which genes it expresses.
 
 1. **Marker genes.** Decades of immunology have established that specific cell types reliably turn on specific genes — e.g. CD8 T cells express `CD8A`/`CD8B`, B cells express `CD19`/`MS4A1`, monocytes express `CD14`/`LYZ`. We define a dictionary of these "marker genes" for the major immune cell types we expect to see (CD8 T, CD4 T, NK, B cell, monocyte, DC, plasma cell).
+
+   **Why these 7 categories?** Two reasons:
+   - **They're the standard major immune lineages.** T cells, B cells, NK cells, myeloid cells (monocyte/DC), and plasma cells (antibody-secreting B cells) are the cell types any blood or tumour-infiltrating immune sample is expected to contain — this is the same set of categories used in general-purpose immune reference atlases (e.g. 10x's PBMC references, Azimuth), not something specific to this dataset.
+   - **They empirically cover almost all the data.** 17 of 18 Leiden clusters (132,532 / 138,500 cells, ~95.7%) get a confident match to one of these 7 categories via their marker genes — only cluster 11 (4.3% of cells) didn't fit any of them (see step 4 below). That high coverage is itself evidence the panel is well-matched to what's actually present in this dataset.
+
+   **Reference:** [Azimuth Human PBMC reference](https://azimuth.hubmapconsortium.org/references/#Human%20-%20PBMC) defines marker genes for these same lineages (T/B/NK/Monocyte/DC/Plasma). PBMC is the relevant comparison rather than a tissue-specific reference like kidney: our markers are *immune lineage* markers (e.g. `CD8A`/`CD8B` for CD8 T cells, `CD14` for monocytes), which define a cell's identity regardless of which organ it's sampled from — unlike tissue-specific references (kidney, lung, etc.), which mostly distinguish *non-immune* parenchymal cell types (tubule cells, podocytes, etc.) that aren't relevant here. PBMC also needs far fewer markers per type than a tissue reference because we're only separating ~7 broad, transcriptionally distinct lineages, not dozens of similar subtypes.
 2. **Dot plot / violin plot.** We plot average marker gene expression for each Leiden cluster. A cluster that lights up strongly for the CD8 marker panel and not the others is called a CD8 T cell cluster, and so on.
 
    ![Marker dotplot](figures/02_marker_dotplot.png)
@@ -126,19 +175,27 @@ Each notebook reads the `.h5ad` (or `.csv`) file written by the previous step an
 
    ![Cell type UMAP](figures/02_umap_celltypes.png)
 
-4. **T cell subset scoring.** Within the T cells, we further score each cell for five *functional states* using small marker gene sets — Naive, Memory, Effector, Exhausted, Regulatory (Treg) — via `sc.tl.score_genes`, which essentially averages expression of each gene set per cell (relative to a random background). These scores (`Exhausted_score`, `Effector_score`, `Naive_score`, etc.) are continuous values per cell, not hard labels, and are what later notebooks use to ask "are expanded clones more exhausted or more effector-like?"
+4. **Cross-check with differential expression.** The marker panel in step 1 comes from prior knowledge, not from this data. `sc.tl.rank_genes_groups` (Wilcoxon, one cluster vs. rest) instead computes each cluster's *actual* top distinguishing genes with no priors, as a sanity check on the marker-based labels. Cluster 11's top DE genes were ribosomal/mitochondrial genes plus `RPS4Y1` (not a cell-identity marker), with no NK markers — its label is `"Unknown"`. For the cell-type panel (step 1, `MARKERS`), this cross-check didn't suggest adding any new major cell types — every other cluster's top DE genes land cleanly into CD8 T / CD4 T / B / Plasma / Monocyte-DC.
+
+   ![Rank genes groups dotplot](figures/02_rank_genes_groups_dotplot.png)
+
+5. **T cell subset scoring.** Within the T cells, we further score each cell for five *functional states* using small marker gene sets — Naive, Memory, Effector, Exhausted, Regulatory (Treg) — via `sc.tl.score_genes`, which essentially averages expression of each gene set per cell (relative to a random background). These scores (`Exhausted_score`, `Effector_score`, `Naive_score`, etc.) are continuous values per cell, not hard labels, and are what later notebooks use to ask "are expanded clones more exhausted or more effector-like?"
+
+   **Worked example for `Exhausted_score`** (gene set = `PDCD1, HAVCR2, TIGIT, LAG3, CTLA4`), for one real cell (`RT2_AAACCTGCAGGTCCAC-1`):
+
+   | Barcode | PDCD1 | HAVCR2 | TIGIT | LAG3 | CTLA4 | mean of gene set | background mean (random genes, similar expression level) | `Exhausted_score` |
+   |---|---|---|---|---|---|---|---|---|
+   | `RT2_AAACCTGCAGGTCCAC-1` | 1.61 | 1.61 | 2.83 | 2.83 | 1.61 | 2.10 | 0.50 | **1.60** |
+
+   `Exhausted_score = mean(gene set expression) - mean(background gene set expression)`. This is repeated for each of the 5 gene sets, so the **output format** is 5 new numeric columns added to `adata.obs` — one row per cell:
+
+   | Barcode | Exhausted_score | Effector_score | Naive_score | Memory_score | Regulatory_score |
+   |---|---|---|---|---|---|
+   | `RT2_AAACCTGCAGGTCCAC-1` | 1.60 | 0.38 | ... | ... | ... |
 
    ![T cell subset markers](figures/02_tcell_subsets_dotplot.png)
 
-5. **Save.** Cell type labels + functional scores are added as new columns and written to `data/02_annotated.h5ad`.
-6. **How our annotation compares to the paper's.** This dataset conveniently includes the paper's own per-cell subtype labels in `obs["cluster_orig"]` (16 categories: `8.1-Teff`, `8.2-Tem`, `8.3a/b/c-Trm`, `8.4-Chrom`, `8.5-Mitosis`, `8.6-KLRB1`, `4.1-Trm` through `4.6b-Treg`, `3.1-MT`). **Both our annotation and the paper's are "manual" in the same sense** — cluster first (unsupervised Leiden), then assign each cluster a name by inspecting which genes it expresses (e.g. the paper's cluster names like `4.3-TCF7` and `4.4-FOS` are clearly named after each cluster's defining marker gene, exactly like our `CLUSTER_ANNOTATION` dict). Neither side hand-labeled individual cells.
-
-   The two annotations agree for ~93% of cells (CD8/CD4 T cell labels), but diverge for **4 of our 18 clusters (9,846 cells, 7.1%)**, which we labeled NK cell / Monocyte-DC / B cell / Plasma cell while every category in `cluster_orig` is a CD4/CD8 T cell subtype. This isn't a flaw in "manual marker-based annotation" as a method — it's because the two annotations were run on different starting populations:
-
-   - **The paper's clustering** appears to have been run on a population already confirmed to be T cells (every `cluster_orig` category is a T cell subtype — there's no "NK"/"B cell"/"Monocyte" bucket to fall into even if a cluster looked atypical).
-   - **Our clustering** was run on the raw, unfiltered dataset, so a few clusters containing cytotoxic CD8 effectors that cross-react with NK markers (GNLY/NKG7/KLRD1), or T cell/B-lineage doublets and ambient-RNA contamination, ended up close enough to our "NK cell"/"B cell"/"Plasma cell"/"Monocyte-DC" marker panels to get pulled into those buckets — buckets the paper's scheme never offered as an option.
-
-   Practically, this 7% discrepancy doesn't affect the headline reproduction numbers in Notebooks 5/6, since the Fig 1 reproduction doesn't depend on `cell_type` at all, and the strongest Fig 2 result (the v2 panel d reproduction) uses `cluster_orig` directly rather than our annotation.
+6. **Save.** Cell type labels + functional scores are added as new columns and written to `data/02_annotated.h5ad`.
 
 ### Notebook 3 — TCR Analysis and Clonotype-State Linking (`03_tcr_analysis.py`)
 
@@ -177,15 +234,7 @@ All of the TCR-specific steps below use **[scirpy](https://scirpy.scverse.org)**
 
    The Exhausted score trend is weaker and not strictly monotonic: it rises from singleton (≈ -0.39) to small (≈ -0.27) to medium (≈ -0.21), but then **dips back down for large clones** (≈ -0.30) — close to the "small" value rather than continuing to climb. So expanded clones (small/medium/large) do sit above singletons in exhaustion, but exhaustion doesn't keep increasing with clone size the way the Effector score does; the very largest clones are slightly *less* exhausted than medium ones, possibly because they're dominated by the still-highly-functional effector cells described above.
 
-   We also make a heatmap of the 20 largest clonotypes' average scores:
-
-   ![Clonotype state heatmap](figures/03_clonotype_state_heatmap.png)
-
-6. **VDJ usage and CDR3 spectratype.** Two standard TCR repertoire QC plots: which V/D/J gene segments are used to build the receptors, and the distribution of CDR3 sequence lengths by cell type — a sanity check that the repertoire looks biologically normal (roughly bell-shaped, ~12-16 amino acids).
-
-   ![CDR3 spectratype](figures/03_cdr3_spectratype.png)
-
-7. **Save.** The merged, clonotype-annotated dataset (95,314 cells, with `clone_id`, `clone_id_size`, `clonal_expansion`, and all the Notebook 2 scores) is written to `data/03_tcr_integrated.h5ad` — this is the file Notebooks 5 and 6 build on.
+6. **Save.** The merged, clonotype-annotated dataset (95,314 cells, with `clone_id`, `clone_id_size`, `clonal_expansion`, and all the Notebook 2 scores) is written to `data/03_tcr_integrated.h5ad` — this is the file Notebooks 5 and 6 build on.
 
 ### Notebook 4 — Cell-Cell Interaction Analysis (`04_cell_interaction.py`)
 
@@ -272,7 +321,7 @@ Of the 14 patients, only **Renal1, Renal2, Renal3, and Lung6** have matched **bl
 3. **Subcluster CD8 T cells at higher resolution.** The dataset-wide Leiden clustering (resolution 0.5, Notebook 1) only yields 4 CD8 T cell clusters — too coarse to separate an "effector" subtype from "exhausted"/"naive" subtypes the way the paper's 33-cluster analysis does. So we re-normalize, re-select HVGs, and re-cluster the CD8 T cell subset alone (PCA + **Harmony integration across patients** + Leiden at resolution 1.0) into **14 subclusters**.
 
    > **Two methodology fixes were needed to get a meaningful result here:**
-   > - **Cell-type annotation fix** (Notebook 2, step 6): correcting the CD3-cross-reactivity mislabeling raised the CD8 T cell count from 33,949 to 79,866 (51,190 of which belong to the 4 blood-sample patients).
+   > - **Cell-type annotation fix** (Notebook 2, step 3): correcting the CD3-cross-reactivity mislabeling raised the CD8 T cell count from 33,949 to 79,866 (51,190 of which belong to the 4 blood-sample patients).
    > - **Patient integration**: an earlier version subclustered CD8 cells with plain PCA/Leiden (no batch correction), pooling all 14 patients. This produced an "Effector-like" subcluster that happened to contain **zero** cells from the 4 blood-sample patients' dual-expanded clones — a patient-driven clustering artifact that made the cluster-composition test degenerate (chi2 dof=0, p=1.0). Adding **Harmony integration** (`sc.external.pp.harmony_integrate`, batch key = `patient`) fixed this.
 
 4. **Characterise CD8 subclusters.** Compute mean Exhausted/Effector/Naive scores per subcluster; the subcluster with the highest (Effector − Exhausted) score difference is labelled "Effector-like" (subcluster 3: Effector_score=-0.11, Exhausted_score=-0.37 — the highest gap of the 14 subclusters).
@@ -335,7 +384,7 @@ Of the 14 patients, only **Renal1, Renal2, Renal3, and Lung6** have matched **bl
 | QC filtering | Cells retained | **138,500** |
 | QC filtering | Genes retained | **20,479** |
 | Highly variable genes | Selected for PCA | **3,000** |
-| Cell annotation | T cells identified | **128,654** (93% of total — see Notebook 2, step 6 for why the paper's labels put this closer to 100%) |
+| Cell annotation | T cells identified | **128,654** (93% of total) |
 | TCR integration | Cells with paired TCR | **95,314** |
 | Clonotype definition | Unique clonotypes | **53,142** |
 | LIANA | Ligand-receptor pairs scored | **4,517** |
