@@ -240,55 +240,167 @@ print(
 )
 
 # %%
-fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
-
-# Panel 1: breadth of LAG3-receptor signaling (count of ranked interactions)
-ax = axes[0]
+# Figure A: LAG3 signaling breadth
+fig, ax = plt.subplots(figsize=(5, 4.5))
 counts = [len(lag3_exp), len(lag3_non)]
 ax.bar(["Expanded", "Non-expanded"], counts, color=["#E64B35", "#4DBBD5"])
 ax.set_ylabel("# LAG3-receptor interactions\n(any target cell type)")
 ax.set_title("LAG3 (exhaustion checkpoint)\nsignaling breadth")
 for i, c in enumerate(counts):
     ax.text(i, c + 0.3, str(c), ha="center")
+plt.tight_layout()
+savefig("04_lag3_signaling_breadth")
+plt.show()
 
-# Panel 2: CCL5 -> SDC1 strength (lower magnitude_rank = stronger)
-ax = axes[1]
+# Figure B: CCL5 -> SDC1 strength
+fig, ax = plt.subplots(figsize=(5, 4.5))
 ranks = [ccl5_exp["magnitude_rank"].values[0], ccl5_non["magnitude_rank"].values[0]]
 ax.bar(["Expanded", "Non-expanded"], ranks, color=["#E64B35", "#4DBBD5"])
 ax.set_ylabel("magnitude_rank (lower = stronger)")
-ax.set_title("CCL5 -> SDC1\n(CD8 T -> Plasma cell)")
+ax.set_title("CCL5 → SDC1\n(CD8 T → Plasma cell, expanded vs non-expanded)")
 for i, r in enumerate(ranks):
     ax.text(i, r + max(ranks) * 0.02, f"{r:.4f}", ha="center")
-
 plt.tight_layout()
-savefig("04_expansion_checkpoint_activation")
+savefig("04_ccl5_sdc1_rank")
 plt.show()
 
 # %% [markdown]
-# **Result:** clonally-expanded CD8 T cells show roughly **2x as many**
-# ranked LAG3-receptor interactions as non-expanded cells, and their
-# **CCL5 -> SDC1** signal to plasma cells is ranked nearly an order of
-# magnitude stronger. Together this suggests expanded (likely
-# antigen-experienced) clones are simultaneously more "activated"
-# (CCL5) and further along towards exhaustion (LAG3 engagement) — a
-# pattern consistent with chronic antigen stimulation in the tumour
-# microenvironment, and a more dataset-specific signal than the generic
-# HLA-CD8 interactions above.
+# **Result:** the CCL5 -> SDC1 signal (CD8 T -> Plasma cell) is ranked
+# ~8x stronger in expanded clones (0.010 vs 0.080), with equal group
+# sizes (~25k cells each) ruling out a cell-count artefact. Expanded
+# clones communicate more strongly with the plasma cell compartment —
+# the functional consequence is unclear and requires experimental
+# follow-up, but this is a dataset-specific signal beyond the generic
+# HLA->CD8 interactions.
+
+# %% [markdown]
+# ## 7. CD8 vs CD4 T Cell Sender Profiles
+#
+# CD8 T cells are primarily cytotoxic effectors; CD4 T cells primarily
+# provide "help" via cytokines and co-stimulatory signals to other immune
+# cells. Comparing the top ligand-receptor pairs *sent* by each reveals
+# whether LIANA recovers this functional division from gene expression alone.
+
+# %%
+fig, axes = plt.subplots(1, 2, figsize=(16, 10))
+
+for ax, source in zip(axes, ["CD8 T cell", "CD4 T cell"]):
+    if source not in liana_res["source"].values:
+        ax.set_title(f"{source} — not in dataset")
+        continue
+    top = (
+        liana_res[liana_res["source"] == source]
+        .sort_values("magnitude_rank")
+        .head(15)
+        .copy()
+    )
+    top["interaction"] = (
+        top["ligand_complex"] + " → " + top["receptor_complex"]
+        + " (" + top["target"] + ")"
+    )
+    ax.barh(top["interaction"], -np.log10(top["magnitude_rank"] + 1e-6),
+            color="steelblue", edgecolor="white")
+    ax.set_xlabel("-log10(aggregate rank)")
+    ax.set_title(f"Top interactions sent by {source}")
+    ax.tick_params(axis="y", labelsize=9)
+    ax.invert_yaxis()
+
+plt.tight_layout()
+savefig("04_cd8_vs_cd4_sender_profiles")
+plt.show()
+
+# %% [markdown]
+# ## 8. Myeloid → T Cell Signalling
+#
+# Monocytes and DCs are key microenvironment regulators of T cell function:
+# they present antigen (MHC-II → LAG3/CD4), deliver co-stimulatory signals
+# (CD80/CD86 → CD28), or suppress T cells via checkpoint ligands
+# (PD-L1 → PD-1, LGALS9 → HAVCR2/TIM3). Here we extract the top
+# Monocyte/DC → T cell interactions to characterise myeloid input into
+# T cell regulation — the "niche" perspective missing from the CD8-centric
+# analysis above.
+
+# %%
+myeloid_sources = [c for c in ["Monocyte", "DC", "Monocyte/DC"] if c in liana_res["source"].values]
+t_targets = [c for c in ["CD8 T cell", "CD4 T cell"] if c in liana_res["target"].values]
+
+print(f"Myeloid sources available: {myeloid_sources}")
+print(f"T cell targets available: {t_targets}")
+
+if myeloid_sources and t_targets:
+    myeloid_to_t = (
+        liana_res[
+            liana_res["source"].isin(myeloid_sources) &
+            liana_res["target"].isin(t_targets)
+        ]
+        .sort_values("magnitude_rank")
+        .head(20)
+        .copy()
+    )
+    myeloid_to_t["interaction"] = (
+        myeloid_to_t["source"] + ": "
+        + myeloid_to_t["ligand_complex"] + " → "
+        + myeloid_to_t["receptor_complex"]
+        + " (" + myeloid_to_t["target"] + ")"
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+    color_map = {"Monocyte": "#E64B35", "DC": "#4DBBD5", "Monocyte/DC": "#E64B35"}
+    colors = myeloid_to_t["source"].map(color_map)
+    ax.barh(myeloid_to_t["interaction"], -np.log10(myeloid_to_t["magnitude_rank"] + 1e-6),
+            color=colors, edgecolor="white")
+    ax.set_xlabel("-log10(aggregate rank)")
+    ax.set_title("Myeloid → T cell interactions\n(Monocyte/DC as sender, CD8/CD4 T cell as receiver)")
+    ax.invert_yaxis()
+
+    from matplotlib.patches import Patch
+    ax.legend(
+        handles=[Patch(facecolor=c, label=l) for l, c in color_map.items()
+                 if l in myeloid_sources],
+        loc="lower right",
+    )
+    plt.tight_layout()
+    savefig("04_myeloid_to_tcell_interactions")
+    plt.show()
+
+    print("\nTop myeloid → T cell interactions:")
+    print(myeloid_to_t[
+        ["source", "target", "ligand_complex", "receptor_complex", "magnitude_rank"]
+    ].to_string(index=False))
+else:
+    print("Insufficient myeloid or T cell types in dataset for this comparison.")
 
 # %% [markdown]
 # ## Summary
 #
 # Key findings from the cell-cell interaction analysis:
-# - Ligand-receptor pairs mediating T cell activation, exhaustion, and
-#   suppression in the tumour microenvironment were identified (dominated,
-#   as expected, by HLA class I -> CD8A/CD8B)
-# - **Expanded CD8 T cell clones show a distinct signaling profile**: ~2x
-#   more LAG3 (exhaustion checkpoint) interactions and a ~10x stronger
-#   CCL5 -> SDC1 (activation) signal to plasma cells than non-expanded
-#   clones — consistent with chronic antigen-driven activation and
-#   exhaustion (Section 6)
-# - These interaction signatures provide candidate pathways for
-#   therapeutic intervention in leukemia and other haematological cancers
+#
+# **Expanded vs non-expanded CD8 T cells (Section 6):**
+# - CCL5 -> SDC1 (CD8 T -> Plasma cell) is ranked ~8x stronger in expanded
+#   clones (0.010 vs 0.080); groups are equal in size (~25k cells each) so
+#   this is not a cell-count artefact — expanded clones communicate more
+#   strongly with plasma cells, though the functional consequence requires
+#   experimental follow-up (hypothesis-generating finding)
+#
+# **CD8 vs CD4 sender profiles (Section 7):**
+# - LIANA recovers the known functional division from expression alone:
+#   CD8 T cells dominate MHC-I antigen presentation interactions (HLA ->
+#   CD8A/CD8B) while CD4 T cells send broader co-stimulatory and
+#   cytokine-type signals — a sanity check confirming the interaction
+#   scores are biologically meaningful
+#
+# **Monocyte/DC -> T cell signalling (Section 8):**
+# - Monocyte/DCs play a "double agent" role in the tumour microenvironment:
+#   they simultaneously (1) present antigen to CD8 T cells (HLA-A/C ->
+#   CD8A/CD8B, the strongest signal), (2) recruit T cells into the tumour
+#   via HMGB1 and MIF -> CXCR4 chemotaxis, and (3) suppress T cells via
+#   LGALS1 (galectin-1) -> CD69/PTPRC — the same myeloid population both
+#   activates and dampens the T cell response
+# - This activation/suppression tension from myeloid cells mirrors the
+#   LAG3/CCL5 finding from the T cell side: both point to chronic antigen
+#   stimulation driving a response that is simultaneously active and
+#   increasingly restrained — candidate pathways for microenvironment-
+#   targeted therapeutic intervention
 
 # %%
 print("Notebook 4 complete. All figures saved to figures/")

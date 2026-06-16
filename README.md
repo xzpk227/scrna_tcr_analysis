@@ -253,6 +253,31 @@ All of the TCR-specific steps below use **[scirpy](https://scirpy.scverse.org)**
 
    ![Expanded vs non-expanded interactions](figures/04_expanded_vs_nonexpanded_interactions.png)
 
+   The top interactions in both groups are dominated by **HLA class I → CD8A/CD8B** — this is just "CD8 T cells engage MHC-I," expected by definition and not informative about expansion status.
+
+5. **CCL5 → SDC1 signal: expanded vs non-expanded.** To find a signal that *does* differ by expansion status beyond the generic HLA→CD8 interactions, we examine **CCL5 → SDC1** (CD8 T cell → Plasma cell): CCL5 is a chemokine produced by activated/cytotoxic T cells; SDC1 (CD138) marks plasma cells.
+
+   ![CCL5 SDC1 rank](figures/04_ccl5_sdc1_rank.png)
+
+   **Key finding:** the CCL5 → SDC1 magnitude rank is **~8× stronger in expanded clones** (0.010 vs 0.080). Critically, the expanded and non-expanded groups are nearly equal in size (~25k cells each), ruling out a cell-count artefact as the explanation.
+
+   **Interpretation:** expanded CD8 T cells express more CCL5, and plasma cells in the same sample express its receptor SDC1 — suggesting expanded clones are communicating more strongly with the plasma cell compartment. The functional consequence of this interaction in this specific context (T cell → plasma cell, not tumour cell) is unclear and would require experimental follow-up; this is a hypothesis-generating finding.
+
+6. **CD8 vs CD4 T cell sender profiles.** Using the same LIANA result, compare the top ligand-receptor pairs *sent* by CD8 T cells vs CD4 T cells. CD8 T cells are primarily cytotoxic effectors; CD4 T cells provide "help" via cytokines and co-stimulation. This comparison tests whether LIANA recovers this known functional division from gene expression alone — a sanity check on the interaction scores and a broader view of T cell communication than the CD8-only analysis above.
+
+   ![CD8 vs CD4 sender profiles](figures/04_cd8_vs_cd4_sender_profiles.png)
+
+7. **Myeloid → T cell signalling.** Extract the top Monocyte/DC → CD8/CD4 T cell interactions — the "other direction" of the microenvironment. Monocytes and DCs are key regulators of T cell fate: they can activate T cells (antigen presentation via MHC-II, co-stimulation via CD80/CD86 → CD28) or suppress them (checkpoint ligands like PD-L1 → PD-1, LGALS9 → HAVCR2/TIM3). This gives the full picture of the niche — not just what T cells are doing, but what the surrounding myeloid cells are sending to shape T cell function.
+
+   ![Myeloid to T cell interactions](figures/04_myeloid_to_tcell_interactions.png)
+
+   **Key findings:**
+   - **Antigen presentation dominates** (HLA-A/C → CD8A/CD8B, strongest signal) — Monocyte/DCs are actively presenting antigen to CD8 T cells, their classical role as APCs.
+   - **Simultaneous suppression via LGALS1 → CD69/PTPRC** — galectin-1 is an immunosuppressive signal that inhibits T cell activation and promotes apoptosis. The same myeloid population presenting antigen is also dampening the T cell response — the "double agent" role of tumour-associated myeloid cells.
+   - **T cell recruitment via HMGB1 + MIF → CXCR4** — both a danger signal (HMGB1, from stressed/dying cells) and a pro-inflammatory myeloid cytokine (MIF) signal through CXCR4 to recruit T cells into the tumour.
+
+   The combined picture: Monocyte/DCs simultaneously recruit, activate, and suppress T cells — the same myeloid population both drives and restrains the anti-tumour T cell response.
+
 This notebook is more exploratory than 1-3 — it doesn't feed numerically into Notebooks 5/6, but it demonstrates the cell-cell communication side of single-cell analysis, which is commonly used to generate hypotheses about the tumour microenvironment.
 
 ### Notebook 5 — Reproducing Figure 1 (`05_figure1_reproduction.py`)
