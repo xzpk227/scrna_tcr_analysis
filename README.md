@@ -255,13 +255,21 @@ All of the TCR-specific steps below use **[scirpy](https://scirpy.scverse.org)**
 
    The top interactions in both groups are dominated by **HLA class I → CD8A/CD8B** — this is just "CD8 T cells engage MHC-I," expected by definition and not informative about expansion status.
 
-5. **CCL5 → SDC1 signal: expanded vs non-expanded.** To find a signal that *does* differ by expansion status beyond the generic HLA→CD8 interactions, we examine **CCL5 → SDC1** (CD8 T cell → Plasma cell): CCL5 is a chemokine produced by activated/cytotoxic T cells; SDC1 (CD138) marks plasma cells.
+5. **Expansion-specific signals: FASLG → TNFRSF1A and CCL5 → SDC1.** Beyond the generic HLA→CD8 interactions shared by both groups, two signals differ specifically by expansion status.
+
+   **FASLG → TNFRSF1A (FasL/Fas cytotoxic killing signal):**
+
+   ![FASLG TNFRSF1A rank](figures/04_faslg_tnfrsf1a_rank.png)
+
+   **Key finding:** FASLG → TNFRSF1A is detected in the expanded CD8 T cell group (rank 0.040) but completely absent from the non-expanded top interactions. FasL (FASLG/CD95L) is one of the primary cytotoxic effector mechanisms of CD8 T cells — it binds Fas receptor (TNFRSF1A) on target cells and triggers caspase-dependent apoptosis. Its presence only in expanded clones directly corroborates the Notebook 6 finding that expanded+blood-detected (D-class) clones are enriched for an effector/cytotoxic phenotype.
+
+   **CCL5 → SDC1 (CD8 T cell → Plasma cell):**
 
    ![CCL5 SDC1 rank](figures/04_ccl5_sdc1_rank.png)
 
-   **Key finding:** the CCL5 → SDC1 magnitude rank is **~8× stronger in expanded clones** (0.010 vs 0.080). Critically, the expanded and non-expanded groups are nearly equal in size (~25k cells each), ruling out a cell-count artefact as the explanation.
+   **Key finding:** the CCL5 → SDC1 magnitude rank is **~8× stronger in expanded clones** (0.010 vs 0.080). The expanded and non-expanded groups are nearly equal in size (~25k cells each), ruling out a cell-count artefact. CCL5 is a known tertiary lymphoid structure (TLS) determinant chemokine — TLS are ectopic immune aggregates in tumours containing CD8 T cells and plasma cells, and TLS presence correlates with better immunotherapy response. Expanded clones signalling more strongly to plasma cells via CCL5 is consistent with a TLS coordination role, though experimental validation would be needed.
 
-   **Interpretation:** expanded CD8 T cells express more CCL5, and plasma cells in the same sample express its receptor SDC1 — suggesting expanded clones are communicating more strongly with the plasma cell compartment. The functional consequence of this interaction in this specific context (T cell → plasma cell, not tumour cell) is unclear and would require experimental follow-up; this is a hypothesis-generating finding.
+   Together, these two signals paint a coherent picture: expanded clones are not just "more cells" but are transcriptionally and functionally distinct — engaging both direct cytotoxic killing (FasL/Fas) and chemokine-mediated immune coordination (CCL5→SDC1).
 
 6. **CD8 vs CD4 T cell sender profiles.** Using the same LIANA result, compare the top ligand-receptor pairs *sent* by CD8 T cells vs CD4 T cells. CD8 T cells are primarily cytotoxic effectors; CD4 T cells provide "help" via cytokines and co-stimulation. This comparison tests whether LIANA recovers this known functional division from gene expression alone — a sanity check on the interaction scores and a broader view of T cell communication than the CD8-only analysis above.
 
